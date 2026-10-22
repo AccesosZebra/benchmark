@@ -1,7 +1,8 @@
 
 import React, { useState } from 'react';
-import { StoredBenchmark, listBenchmarks, deleteBenchmark } from '../services/storage';
+import { StoredBenchmark, listBenchmarks, listAllBenchmarks, deleteBenchmark } from '../services/storage';
 import { downloadBenchmarkHtml, downloadBenchmarkJson } from '../services/exportBenchmark';
+import { getSession } from '../services/auth';
 
 interface HistoryPanelProps {
   onOpen: (record: StoredBenchmark) => void;
@@ -14,12 +15,15 @@ const fmtDate = (iso: string) =>
   new Date(iso).toLocaleDateString('es-MX', { day: 'numeric', month: 'short', year: 'numeric' });
 
 const HistoryPanel: React.FC<HistoryPanelProps> = ({ onOpen, onClose }) => {
-  const [items, setItems] = useState<StoredBenchmark[]>(() => listBenchmarks());
+  // Los invitados ven solo lo suyo; los usuarios internos (Zebra) ven todo.
+  const isGuest = getSession()?.provider === 'guest';
+  const load = () => (isGuest ? listBenchmarks() : listAllBenchmarks());
+  const [items, setItems] = useState<StoredBenchmark[]>(load);
   const total = items.reduce((s, b) => s + (b.result?.cost?.usd || 0), 0);
 
   const handleDelete = (id: string) => {
     deleteBenchmark(id);
-    setItems(listBenchmarks());
+    setItems(load());
   };
 
   return (
@@ -28,7 +32,8 @@ const HistoryPanel: React.FC<HistoryPanelProps> = ({ onOpen, onClose }) => {
         <div>
           <h2 className="text-xl font-semibold text-text">Historial de benchmarks</h2>
           <p className="text-xs text-muted font-normal mt-1">
-            {items.length} guardados · costo acumulado <span className="text-text font-medium font-mono">{fmtUsd(total)}</span> USD
+            {items.length} guardados{!isGuest ? ' (todos los usuarios)' : ''} · costo acumulado{' '}
+            <span className="text-text font-medium font-mono">{fmtUsd(total)}</span> USD
           </p>
         </div>
         <button
@@ -51,6 +56,7 @@ const HistoryPanel: React.FC<HistoryPanelProps> = ({ onOpen, onClose }) => {
                 <p className="text-sm font-semibold text-text truncate">{b.title}</p>
                 <p className="text-[10px] text-muted font-mono uppercase tracking-wider mt-1">
                   {fmtDate(b.createdAt)} · {b.result?.competitors?.length || 0} competidores
+                  {!isGuest && b.owner && b.owner !== 'anon' ? ` · ${b.owner}` : ''}
                 </p>
               </div>
               <div className="text-right flex-shrink-0">

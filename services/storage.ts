@@ -9,6 +9,7 @@ export interface StoredBenchmark {
   createdAt: string; // ISO
   context: string;   // input usado (para referencia / re-lanzar)
   result: BenchmarkResult;
+  owner?: string;    // correo del usuario dueño (se rellena al listar "todos")
 }
 
 const BASE_KEY = 'ZEBRA_BENCHMARKS';
@@ -55,8 +56,28 @@ const deriveTitle = (context: string): string => {
   return clean.length > 70 ? clean.slice(0, 70) + '…' : clean;
 };
 
-const persist = (list: StoredBenchmark[]): void => {
-  const key = userKey();
+// ---- Lectura/escritura por clave arbitraria (para operar entre usuarios) ----
+const allKeys = (): string[] => {
+  try {
+    return Object.keys(localStorage).filter((k) => k === BASE_KEY || k.startsWith(`${BASE_KEY}::`));
+  } catch {
+    return [];
+  }
+};
+
+const ownerOf = (key: string): string => (key === BASE_KEY ? 'anterior' : key.slice(`${BASE_KEY}::`.length));
+
+const readKey = (key: string): StoredBenchmark[] => {
+  try {
+    const raw = localStorage.getItem(key);
+    const list = raw ? (JSON.parse(raw) as StoredBenchmark[]) : [];
+    return Array.isArray(list) ? list : [];
+  } catch {
+    return [];
+  }
+};
+
+const persistTo = (key: string, list: StoredBenchmark[]): void => {
   try {
     localStorage.setItem(key, JSON.stringify(list));
   } catch {
@@ -67,6 +88,20 @@ const persist = (list: StoredBenchmark[]): void => {
       /* sin remedio: se pierde el guardado */
     }
   }
+};
+
+const persist = (list: StoredBenchmark[]): void => persistTo(userKey(), list);
+
+// Todos los benchmarks de TODOS los usuarios de este navegador (para vista interna).
+export const listAllBenchmarks = (): StoredBenchmark[] => {
+  migrateLegacy();
+  const out: StoredBenchmark[] = [];
+  for (const key of allKeys()) {
+    const owner = ownerOf(key);
+    for (const b of readKey(key)) out.push({ ...b, owner });
+  }
+  out.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+  return out;
 };
 
 export const saveBenchmark = (context: string, result: BenchmarkResult): StoredBenchmark => {
@@ -82,17 +117,24 @@ export const saveBenchmark = (context: string, result: BenchmarkResult): StoredB
   return record;
 };
 
+// Borra/actualiza buscando el id en cualquier usuario (para que la vista interna
+// pueda operar sobre benchmarks de invitados).
 export const deleteBenchmark = (id: string): void => {
-  persist(listBenchmarks().filter((b) => b.id !== id));
+  for (const key of allKeys()) {
+    const list = readKey(key);
+    if (list.some((b) => b.id === id)) persistTo(key, list.filter((b) => b.id !== id));
+  }
 };
 
-// Reemplaza el resultado de un benchmark guardado (ej. al agregar competidores).
 export const updateBenchmark = (id: string, result: BenchmarkResult): void => {
-  const list = listBenchmarks();
-  const idx = list.findIndex((b) => b.id === id);
-  if (idx === -1) return;
-  list[idx] = { ...list[idx], result };
-  persist(list);
+  for (const key of allKeys()) {
+    const list = readKey(key);
+    const idx = list.findIndex((b) => b.id === id);
+    if (idx !== -1) {
+      list[idx] = { ...list[idx], result };
+      persistTo(key, list);
+    }
+  }
 };
 
 // Suma de costo de todos los benchmarks guardados (USD).
