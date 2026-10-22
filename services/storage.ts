@@ -20,21 +20,39 @@ const userKey = (): string => {
   return `${BASE_KEY}::${email.toLowerCase()}`;
 };
 
-const deriveTitle = (context: string): string => {
-  const firstLine = (context || '').split('\n').map((l) => l.trim()).find((l) => l.length > 0) || '';
-  const clean = firstLine.replace(/\s+/g, ' ').trim();
-  if (!clean) return 'Benchmark sin título';
-  return clean.length > 70 ? clean.slice(0, 70) + '…' : clean;
+// Migración única: el historial viejo (antes del acceso por usuario) vivía en la
+// clave sin sufijo `ZEBRA_BENCHMARKS`. Lo adoptamos al usuario actual para que no
+// se vea como "borrado", y luego quitamos la clave vieja.
+const migrateLegacy = (): void => {
+  try {
+    const legacy = localStorage.getItem(BASE_KEY);
+    if (!legacy || legacy[0] !== '[') return; // nada o formato inesperado
+    const key = userKey();
+    if (!localStorage.getItem(key)) {
+      localStorage.setItem(key, legacy); // el usuario actual aún no tiene nada → adopta el viejo
+    }
+    localStorage.removeItem(BASE_KEY); // una sola vez
+  } catch {
+    /* noop */
+  }
 };
 
 export const listBenchmarks = (): StoredBenchmark[] => {
   try {
+    migrateLegacy();
     const raw = localStorage.getItem(userKey());
     const list = raw ? (JSON.parse(raw) as StoredBenchmark[]) : [];
     return Array.isArray(list) ? list : [];
   } catch {
     return [];
   }
+};
+
+const deriveTitle = (context: string): string => {
+  const firstLine = (context || '').split('\n').map((l) => l.trim()).find((l) => l.length > 0) || '';
+  const clean = firstLine.replace(/\s+/g, ' ').trim();
+  if (!clean) return 'Benchmark sin título';
+  return clean.length > 70 ? clean.slice(0, 70) + '…' : clean;
 };
 
 const persist = (list: StoredBenchmark[]): void => {
