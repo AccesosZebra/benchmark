@@ -68,6 +68,15 @@ export const deleteBenchmark = (id: string): void => {
   persist(listBenchmarks().filter((b) => b.id !== id));
 };
 
+// Reemplaza el resultado de un benchmark guardado (ej. al agregar competidores).
+export const updateBenchmark = (id: string, result: BenchmarkResult): void => {
+  const list = listBenchmarks();
+  const idx = list.findIndex((b) => b.id === id);
+  if (idx === -1) return;
+  list[idx] = { ...list[idx], result };
+  persist(list);
+};
+
 // Suma de costo de todos los benchmarks guardados (USD).
 export const totalSpent = (): number =>
   listBenchmarks().reduce((sum, b) => sum + (b.result?.cost?.usd || 0), 0);

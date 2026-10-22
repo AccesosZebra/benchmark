@@ -503,7 +503,9 @@ ${context}
 Responde SOLO con JSON puro:
 {"name":"${base.name}","url":"URL confirmada o '${base.url}'","location":"Ubicación exacta",
 "pricing":"Precios en MXN o modelo, con cifras (o 'Estimado: ...' si dedujiste)","advantages":["Ventaja 1","Ventaja 2","Ventaja 3"],
-"differentiator":"Su gancho principal","priceScore":0-100,"valueScore":0-100,
+"differentiator":"Su gancho principal",
+"priceScore":"0-100 según el PRECIO real hallado: 0 = el más económico del segmento, 100 = el más caro/premium (ej. precio por m2/lote vs. comparables de la zona)",
+"valueScore":"0-100 según la OFERTA: 0 = básica, 100 = la más completa (amenidades, acabados, ubicación, servicios, plusvalía). Basa el puntaje en lo que ofrece, NO en reputación ni reviews.",
 "selfConfidence":"alta|media|baja"}`;
 
   try {
@@ -751,4 +753,125 @@ export const analyzeBenchmark = async (
     generatedAt,
     cost: computeCost(runUsage, resolveModel()),
   };
+};
+
+// ---------------------------------------------------------------------------
+// Agregar competidores a un reporte EXISTENTE (sin rehacer lo ya presentado).
+// Solo investiga y anexa los nuevos; conserva resumen, estrategia y puntos ya mostrados.
+// ---------------------------------------------------------------------------
+
+const setDateNote = (): string => {
+  const now = new Date();
+  currentDateNote = `Contexto temporal: hoy es ${now.toLocaleDateString("es-MX", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+  })} y estamos en el año ${now.getFullYear()}. Usa ${now.getFullYear()} como referencia temporal; NO asumas años anteriores.`;
+  return now.toISOString();
+};
+
+// Identifica N competidores ADICIONALES distintos a los ya existentes.
+const identifyMore = async (
+  client: Anthropic,
+  context: string,
+  existingNames: string[],
+  n: number,
+  docBlocks: any[]
+): Promise<Array<{ name: string; url: string; location: string }>> => {
+  const prompt = `Ya identificamos estos competidores: ${existingNames.join(", ") || "(ninguno)"}.
+Identifica ${n} competidores ADICIONALES y DISTINTOS a los anteriores para el siguiente negocio
+(directos o medianamente directos: variantes, sustitutos cercanos, alternativas del mismo mercado).
+EXCLUYE estrictamente los ya listados. ${currentDateNote} ${SECTOR_HINT} ${PRICING_HINT}
+
+CONTEXTO DEL NEGOCIO:
+${context}
+
+Responde SOLO con JSON puro:
+{"competitors":[{"name":"Nombre real","url":"URL oficial o ''","location":"Ciudad/Zona"}]}`;
+
+  const { text: out } = await runWithSearch(client, [...docBlocks, { type: "text", text: prompt }]);
+  const data = await parseOrStructure(client, out, IDENTIFY_SCHEMA);
+  const list = Array.isArray(data?.competitors) ? data.competitors : [];
+  const existing = new Set(existingNames.map((s) => s.toLowerCase()));
+  return list
+    .filter((c: any) => c?.name && !existing.has(String(c.name).toLowerCase()))
+    .slice(0, n)
+    .map((c: any) => ({ name: String(c.name), url: String(c.url || ""), location: String(c.location || "") }));
+};
+
+const addCosts = (a: any, b: any) => ({
+  model: b.model,
+  inputTokens: (a?.inputTokens || 0) + b.inputTokens,
+  outputTokens: (a?.outputTokens || 0) + b.outputTokens,
+  cacheReadTokens: (a?.cacheReadTokens || 0) + b.cacheReadTokens,
+  cacheWriteTokens: (a?.cacheWriteTokens || 0) + b.cacheWriteTokens,
+  webSearches: (a?.webSearches || 0) + b.webSearches,
+  usd: Math.round(((a?.usd || 0) + b.usd) * 10000) / 10000,
+});
+
+export const addMoreCompetitors = async (
+  report: BenchmarkResult,
+  opts: { names?: string[]; count?: number; context: string; files: FileData[] },
+  onProgress?: ProgressFn
+): Promise<{ report: BenchmarkResult; addedCost: ReturnType<typeof computeCost> }> => {
+  runUsage = zeroUsage();
+  const client = new Anthropic({ apiKey: getApiKey(), dangerouslyAllowBrowser: true });
+  const emit = (m: string) => onProgress?.(m);
+  setDateNote();
+
+  const existingNames = report.competitors.map((c) => c.name);
+  const existingLower = new Set(existingNames.map((s) => s.toLowerCase()));
+
+  // Semillas: nombres indicados por el usuario, o descubrir N adicionales.
+  let seeds: Array<{ name: string; url: string; location: string }>;
+  const wanted = (opts.names || []).map((s) => s.trim()).filter(Boolean);
+  if (wanted.length) {
+    seeds = wanted
+      .filter((n) => !existingLower.has(n.toLowerCase()))
+      .map((n) => ({ name: n, url: "", location: "" }));
+  } else {
+    emit("Buscando competidores adicionales...");
+    const { blocks } = budgetedDocBlocks(opts.files || []);
+    seeds = await identifyMore(client, opts.context, existingNames, Math.max(1, opts.count || 2), blocks);
+  }
+
+  if (seeds.length === 0) {
+    throw userError(
+      "No encontramos competidores nuevos distintos a los actuales. " +
+        "Prueba indicando nombres específicos."
+    );
+  }
+
+  emit(`Investigando ${seeds.length} competidor(es) nuevo(s)...`);
+  const researched = await Promise.allSettled(seeds.map((s) => researchCompetitor(client, opts.context, s)));
+  let fresh: Competitor[] = researched
+    .filter((r): r is PromiseFulfilledResult<Competitor> => r.status === "fulfilled")
+    .map((r) => r.value);
+
+  if (fresh.length === 0) {
+    const firstRejected = researched.find((r) => r.status === "rejected") as PromiseRejectedResult | undefined;
+    throw firstRejected ? classifyError(firstRejected.reason) : userError("No pudimos investigar a los nuevos competidores.");
+  }
+
+  emit("Verificando...");
+  try {
+    fresh = await verifyCompetitors(client, opts.context, fresh);
+  } catch (e) {
+    console.warn("Verificación de nuevos omitida:", e);
+  }
+
+  // Anexa sin tocar lo ya presentado (resumen, estrategia, huecos, puntos previos).
+  const competitors = [...report.competitors, ...fresh];
+  const newPoints: PositioningPoint[] = fresh.map((c) => ({
+    name: c.name,
+    priceScore: c.priceScore ?? 50,
+    valueScore: c.valueScore ?? 50,
+  }));
+  const positioning = [...report.positioning, ...newPoints];
+  const sources = dedupeSources([...report.sources, ...fresh.flatMap((c) => c.sources || [])]);
+
+  const addedCost = computeCost(runUsage, resolveModel());
+  const cost = addCosts(report.cost, addedCost);
+
+  return { report: { ...report, competitors, positioning, sources, cost }, addedCost };
 };

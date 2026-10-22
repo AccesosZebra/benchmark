@@ -7,10 +7,10 @@ import ThemeToggle from './components/ThemeToggle';
 import LoadingScreen from './components/LoadingScreen';
 import PreAnalysisPanel from './components/PreAnalysisPanel';
 import HistoryPanel from './components/HistoryPanel';
-import { analyzeBenchmark, preAnalyze } from './services/researchService';
-import { saveBenchmark } from './services/storage';
+import { analyzeBenchmark, preAnalyze, addMoreCompetitors } from './services/researchService';
+import { saveBenchmark, updateBenchmark } from './services/storage';
 import { getSession } from './services/auth';
-import { reportGuestSpend } from './services/reporting';
+import { reportGuestSpend, reportGuestAddonSpend } from './services/reporting';
 
 const LOADING_STEPS = [
   "Consultando fuentes globales...",
@@ -35,6 +35,8 @@ const App: React.FC = () => {
   const [liveStatus, setLiveStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [report, setReport] = useState<BenchmarkResult | null>(null);
+  const [currentId, setCurrentId] = useState<string | null>(null);
+  const [currentContext, setCurrentContext] = useState('');
 
   useEffect(() => {
     let interval: any;
@@ -89,6 +91,8 @@ const App: React.FC = () => {
       setReport(result);
       try {
         const rec = saveBenchmark(ctx, result);
+        setCurrentId(rec.id);
+        setCurrentContext(ctx);
         // Reporta el gasto al webhook solo si el usuario es invitado.
         const s = getSession();
         if (s?.provider === 'guest') reportGuestSpend(s, rec);
@@ -111,7 +115,28 @@ const App: React.FC = () => {
     setError(null);
     setPreAnalysis(null);
     setAnswers({});
+    setCurrentId(null);
+    setCurrentContext('');
     setStage('input');
+  };
+
+  // Agrega competidores al reporte actual sin rehacer lo ya presentado.
+  const handleAddCompetitors = async (opts: { names: string[]; count: number }) => {
+    if (!report) return;
+    const { report: updated, addedCost } = await addMoreCompetitors(
+      report,
+      { names: opts.names, count: opts.count, context: currentContext || inputText, files },
+      undefined
+    );
+    setReport(updated);
+    if (currentId) {
+      try { updateBenchmark(currentId, updated); } catch { /* noop */ }
+    }
+    const s = getSession();
+    if (s?.provider === 'guest') {
+      const title = (currentContext || inputText).split('\n')[0].slice(0, 70) || 'Benchmark';
+      reportGuestAddonSpend(s, title, currentId || 'addon', addedCost);
+    }
   };
 
   return (
@@ -149,12 +174,14 @@ const App: React.FC = () => {
           <HistoryPanel
             onOpen={(rec) => {
               setReport(rec.result);
+              setCurrentId(rec.id);
+              setCurrentContext(rec.context || '');
               setStage('report');
             }}
             onClose={() => setStage(report ? 'report' : 'input')}
           />
         ) : stage === 'report' && report ? (
-          <BenchmarkReport report={report} />
+          <BenchmarkReport report={report} onAddCompetitors={handleAddCompetitors} />
         ) : stage === 'loading' ? (
           <LoadingScreen status={liveStatus} fallback={LOADING_STEPS[loadingStep]} />
         ) : stage === 'refine' && preAnalysis ? (

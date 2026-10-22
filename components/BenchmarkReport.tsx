@@ -1,10 +1,11 @@
 
-import React from 'react';
+import React, { useState } from 'react';
 import { BenchmarkResult, Confidence } from '../types';
 import PositioningMap from './PositioningMap';
 
 interface BenchmarkReportProps {
   report: BenchmarkResult;
+  onAddCompetitors?: (opts: { names: string[]; count: number }) => Promise<void>;
 }
 
 // Badge de confianza tras la verificación cruzada. Monocromático (ZR-05).
@@ -23,12 +24,34 @@ const ConfidenceBadge: React.FC<{ level?: Confidence; note?: string }> = ({ leve
   );
 };
 
-const BenchmarkReport: React.FC<BenchmarkReportProps> = ({ report }) => {
+const BenchmarkReport: React.FC<BenchmarkReportProps> = ({ report, onAddCompetitors }) => {
   const printedOn = new Date(report.generatedAt || Date.now()).toLocaleDateString('es-MX', {
     day: 'numeric',
     month: 'long',
     year: 'numeric',
   });
+
+  const [showAdd, setShowAdd] = useState(false);
+  const [addNames, setAddNames] = useState('');
+  const [addCount, setAddCount] = useState(2);
+  const [adding, setAdding] = useState(false);
+  const [addError, setAddError] = useState<string | null>(null);
+
+  const submitAdd = async () => {
+    if (!onAddCompetitors || adding) return;
+    setAdding(true);
+    setAddError(null);
+    try {
+      const names = addNames.split(',').map((s) => s.trim()).filter(Boolean);
+      await onAddCompetitors({ names, count: addCount });
+      setShowAdd(false);
+      setAddNames('');
+    } catch (e: any) {
+      setAddError(e?.message || 'No pudimos agregar competidores.');
+    } finally {
+      setAdding(false);
+    }
+  };
 
   return (
     <div className="space-y-8 animate-fade-in pb-20">
@@ -62,6 +85,17 @@ const BenchmarkReport: React.FC<BenchmarkReportProps> = ({ report }) => {
               </span>
             </div>
           )}
+          {onAddCompetitors && (
+            <button
+              onClick={() => { setShowAdd((v) => !v); setAddError(null); }}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-btn border border-line text-[10px] font-medium text-text hover:bg-surface-2 hover:border-accent transition-all uppercase tracking-widest font-mono"
+            >
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" strokeWidth="1.75" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+              </svg>
+              Competidores
+            </button>
+          )}
           <button
             onClick={() => window.print()}
             className="inline-flex items-center gap-2 px-4 py-2 rounded-btn border border-line text-[10px] font-medium text-text hover:bg-surface-2 hover:border-accent transition-all uppercase tracking-widest font-mono"
@@ -73,6 +107,56 @@ const BenchmarkReport: React.FC<BenchmarkReportProps> = ({ report }) => {
           </button>
         </div>
       </div>
+
+      {/* Agregar competidores al reporte existente (no se imprime) */}
+      {showAdd && onAddCompetitors && (
+        <div className="no-print bg-surface border border-line rounded-card p-4 shadow-sm">
+          <p className="text-xs font-semibold text-text">Agregar competidores a este reporte</p>
+          <p className="text-[11px] text-muted font-normal mt-1 mb-3">
+            Se investigan y anexan sin cambiar lo ya presentado. Escribe nombres específicos (coma) o deja
+            vacío para que busque automáticamente.
+          </p>
+          <div className="flex flex-col sm:flex-row gap-2">
+            <input
+              type="text"
+              value={addNames}
+              disabled={adding}
+              onChange={(e) => setAddNames(e.target.value)}
+              placeholder="Ej: Grupo Cumbres, Guayacán (opcional)"
+              className="flex-1 p-2.5 bg-surface-2 border border-line rounded-input focus:shadow-[0_0_0_1px_var(--accent)] focus:border-accent transition-all outline-none text-text font-normal placeholder:text-muted text-sm"
+            />
+            {!addNames.trim() && (
+              <select
+                value={addCount}
+                disabled={adding}
+                onChange={(e) => setAddCount(Number(e.target.value))}
+                className="p-2.5 bg-surface-2 border border-line rounded-input text-text text-sm outline-none focus:border-accent"
+              >
+                {[1, 2, 3, 4].map((n) => (
+                  <option key={n} value={n}>{n} más</option>
+                ))}
+              </select>
+            )}
+            <button
+              onClick={submitAdd}
+              disabled={adding}
+              className={`px-5 py-2.5 rounded-btn text-xs font-semibold uppercase tracking-widest font-mono transition-all ${
+                adding ? 'bg-surface-2 text-muted border border-line cursor-not-allowed' : 'bg-accent text-bg hover:-translate-y-0.5'
+              }`}
+            >
+              {adding ? 'Agregando…' : 'Agregar'}
+            </button>
+          </div>
+          {adding && (
+            <p className="text-[11px] text-muted font-mono mt-2 animate-pulse">
+              Investigando con búsqueda web… puede tomar un momento.
+            </p>
+          )}
+          {addError && (
+            <p className="text-[11px] text-text font-medium mt-2 bg-surface-2 border border-line rounded-control p-2">{addError}</p>
+          )}
+        </div>
+      )}
 
       {/* Resumen Ejecutivo */}
       <section className="bg-surface p-6 rounded-card shadow-sm border border-line break-inside-avoid">
