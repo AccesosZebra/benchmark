@@ -17,17 +17,21 @@ COPY . .
 # Build the application
 RUN npm run build
 
-# Stage 2: Serve with nginx
-FROM nginx:alpine
+# Stage 2: Servidor Node (SPA + API /api con Postgres)
+FROM node:22-alpine
+
+WORKDIR /app
 
 # Install curl for health checks
 RUN apk add --no-cache curl
 
-# Copy built assets from builder stage
-COPY --from=builder /app/dist /usr/share/nginx/html
+# Solo dependencias de producción (pg para el servidor)
+COPY package*.json ./
+RUN npm ci --omit=dev
 
-# Copy custom nginx configuration
-COPY nginx.conf /etc/nginx/conf.d/default.conf
+# Copy built assets and server
+COPY --from=builder /app/dist /app/dist
+COPY server /app/server
 
 # Copy and setup entrypoint script for runtime env injection
 COPY docker-entrypoint.sh /docker-entrypoint.sh

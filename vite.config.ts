@@ -11,10 +11,6 @@ export default defineConfig({
     'process.env.ANTHROPIC_MODEL': JSON.stringify(process.env.ANTHROPIC_MODEL || ''),
     // Client ID de Google (público). Placeholder sustituido en runtime por el entrypoint.
     'process.env.GOOGLE_CLIENT_ID': JSON.stringify(process.env.GOOGLE_CLIENT_ID || '__RUNTIME_GOOGLE_CLIENT_ID__'),
-    // Usuarios invitados (correo:clave,...) en base64. Placeholder inyectado en runtime.
-    'process.env.GUEST_USERS_B64': JSON.stringify(
-      process.env.GUEST_USERS ? Buffer.from(process.env.GUEST_USERS).toString('base64') : '__RUNTIME_GUEST_USERS_B64__'
-    )
   },
   build: {
     outDir: 'dist',
@@ -25,6 +21,8 @@ export default defineConfig({
     }
   },
   server: {
-    port: 3000
+    port: 3000,
+    // En desarrollo, la API la sirve `npm run server` (server/index.mjs).
+    proxy: { '/api': 'http://localhost:8080' }
   }
 });

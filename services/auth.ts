@@ -1,6 +1,6 @@
 // Autenticación con Google (Google Identity Services), restringida por dominio.
-// La app es 100% cliente, así que solo se usa el CLIENT ID (público, no secreto).
-// El flujo devuelve un JWT (ID token) que decodificamos y validamos por dominio.
+// El navegador obtiene el ID token de Google y el servidor lo valida y devuelve
+// una sesión firmada que se manda como Bearer en cada llamada a la API.
 
 export interface AuthSession {
   email: string;
@@ -8,6 +8,7 @@ export interface AuthSession {
   picture: string;
   exp: number; // epoch en segundos
   provider?: 'google' | 'guest';
+  token?: string; // sesión firmada por el servidor (Authorization: Bearer)
 }
 
 const SESSION_KEY = 'ZEBRA_AUTH';
@@ -24,91 +25,31 @@ export const getGoogleClientId = (): string => {
   );
 };
 
-// Dominio permitido. Por defecto zebradigital.marketing; overridable por localStorage.
-export const allowedDomain = (): string =>
-  (typeof window !== 'undefined' ? localStorage.getItem('GOOGLE_ALLOWED_DOMAIN') : null) ||
-  'zebradigital.marketing';
+// Dominio permitido (solo para mostrarlo; la validación real ocurre en el servidor).
+export const allowedDomain = (): string => 'zebradigital.marketing';
 
-const decodeJwt = (token: string): any => {
-  const payload = token.split('.')[1];
-  const b64 = payload.replace(/-/g, '+').replace(/_/g, '/');
-  const json = decodeURIComponent(
-    atob(b64)
-      .split('')
-      .map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
-      .join('')
-  );
-  return JSON.parse(json);
-};
-
-// Valida el ID token de Google y devuelve la sesión, o lanza un error legible.
-export const verifyCredential = (credential: string): AuthSession => {
-  let payload: any;
+// Llama a un endpoint de login del servidor y devuelve la sesión firmada.
+const login = async (path: string, body: any): Promise<AuthSession> => {
+  let r: Response;
   try {
-    payload = decodeJwt(credential);
+    r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   } catch {
-    throw new Error('No pudimos leer tu identidad de Google. Inténtalo de nuevo.');
+    throw new Error('No pudimos conectar con el servidor. Inténtalo de nuevo.');
   }
-
-  const email = String(payload.email || '').toLowerCase();
-  const domain = allowedDomain().toLowerCase();
-  const emailOk = email.endsWith('@' + domain);
-  const hdOk = String(payload.hd || '').toLowerCase() === domain;
-
-  if (!emailOk && !hdOk) {
-    throw new Error(`Acceso restringido: usa tu cuenta @${domain}.`);
-  }
-  if (payload.email_verified === false) {
-    throw new Error('Tu correo de Google no está verificado.');
-  }
-
-  return {
-    email,
-    name: String(payload.name || email),
-    picture: String(payload.picture || ''),
-    exp: Number(payload.exp) || 0,
-    provider: 'google',
-  };
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || 'No se pudo iniciar sesión.');
+  return { ...data.session, token: data.token };
 };
 
-// ---- Acceso como invitado (correo + contraseña, sin Google) ----
-// Los invitados se definen por entorno: GUEST_USERS="correo:clave,correo2:clave2".
-// Se inyecta en runtime en base64 (evita problemas de caracteres especiales).
-const getGuestUsersRaw = (): string => {
-  const b64 = process.env.GUEST_USERS_B64;
-  if (b64 && !b64.includes('__RUNTIME')) {
-    try {
-      return atob(b64);
-    } catch {
-      return '';
-    }
-  }
-  return (typeof window !== 'undefined' ? localStorage.getItem('GUEST_USERS') : '') || '';
-};
+// Valida el ID token de Google en el servidor (firma, audiencia y dominio).
+export const verifyCredential = (credential: string): Promise<AuthSession> =>
+  login('/api/auth/google', { credential });
 
-const parseGuests = (raw: string): Array<{ email: string; password: string }> =>
-  raw
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean)
-    .map((pair) => {
-      const i = pair.indexOf(':');
-      if (i === -1) return null;
-      return { email: pair.slice(0, i).trim().toLowerCase(), password: pair.slice(i + 1) };
-    })
-    .filter((x): x is { email: string; password: string } => !!x);
-
-export const guestAccessAvailable = (): boolean => parseGuests(getGuestUsersRaw()).length > 0;
-
-export const verifyGuest = (email: string, password: string): AuthSession => {
+// ---- Acceso como invitado (correo + contraseña, validado en el servidor) ----
+export const verifyGuest = (email: string, password: string): Promise<AuthSession> => {
   const e = email.trim().toLowerCase();
-  if (!e || !password) throw new Error('Ingresa correo y contraseña.');
-  const users = parseGuests(getGuestUsersRaw());
-  if (users.length === 0) throw new Error('El acceso de invitado no está configurado.');
-  const match = users.find((u) => u.email === e && u.password === password);
-  if (!match) throw new Error('Correo o contraseña de invitado incorrectos.');
-  const DAYS = 30;
-  return { email: e, name: e, picture: '', exp: Math.floor(Date.now() / 1000) + DAYS * 86400, provider: 'guest' };
+  if (!e || !password) return Promise.reject(new Error('Ingresa correo y contraseña.'));
+  return login('/api/auth/guest', { email: e, password });
 };
 
 export const getSession = (): AuthSession | null => {
@@ -117,18 +58,10 @@ export const getSession = (): AuthSession | null => {
     const raw = localStorage.getItem(SESSION_KEY);
     if (!raw) return null;
     const s = JSON.parse(raw) as AuthSession;
-    if (!s.exp || s.exp * 1000 <= Date.now()) {
+    // Sesiones previas al backend no traen token: se pide volver a entrar.
+    if (!s.token || !s.exp || s.exp * 1000 <= Date.now()) {
       localStorage.removeItem(SESSION_KEY);
       return null;
-    }
-    // Los usuarios de Google deben seguir siendo del dominio permitido.
-    // Los invitados no están sujetos a esa restricción.
-    if (s.provider !== 'guest') {
-      const domain = allowedDomain().toLowerCase();
-      if (!s.email.endsWith('@' + domain)) {
-        localStorage.removeItem(SESSION_KEY);
-        return null;
-      }
     }
     return s;
   } catch {

@@ -91,7 +91,28 @@ For Easypanel deployments:
 
 **Note:** Both `API_KEY` and `GEMINI_API_KEY` variable names are supported.
 
+## Base de datos global (Postgres)
+
+El contenedor corre un servidor Node (`server/index.mjs`) que sirve la SPA y la API
+`/api/benchmarks`. El historial se guarda en Postgres y es compartido entre dispositivos:
+los usuarios internos (`@zebradigital.marketing`) ven todos los benchmarks; los invitados
+solo los suyos. Borrar: el dueño o cualquier usuario interno.
+
+Variables de entorno requeridas:
+
+- `DATABASE_URL`: `postgres://usuario:clave@host:5432/base` (la tabla se crea sola al arrancar).
+- `SESSION_SECRET`: cadena aleatoria larga para firmar las sesiones.
+- `GOOGLE_CLIENT_ID`: se valida también en el servidor (audiencia del ID token).
+- `GUEST_USERS`: `correo:clave,...` — ahora se valida solo en el servidor; ya no se envía al navegador.
+
+En el primer acceso, cada navegador sube automáticamente su historial previo de `localStorage`.
+
+Desarrollo local: `npm run server` (API en `:8080`, con `PORT=8080 DATABASE_URL=... SESSION_SECRET=...`)
+y `npm run dev` en paralelo (Vite hace proxy de `/api`).
+
 ## Nginx Configuration
+
+> Ya no se usa en la imagen de Docker (la sirve el servidor Node); se conserva como referencia.
 
 The included `nginx.conf` provides:
 - SPA routing (all routes redirect to index.html)

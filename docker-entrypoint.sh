@@ -7,7 +7,7 @@ set -e
 echo "🔧 Injecting runtime environment variables..."
 
 # Find all JS files in dist
-JS_FILES=$(find /usr/share/nginx/html -type f -name "*.js")
+JS_FILES=$(find /app/dist -type f -name "*.js")
 
 # Clave de Claude (Anthropic). Acepta ANTHROPIC_API_KEY o API_KEY como respaldo.
 RUNTIME_ANTHROPIC_KEY="${ANTHROPIC_API_KEY:-${API_KEY:-}}"
@@ -36,19 +36,9 @@ else
   echo "⚠️  No GOOGLE_CLIENT_ID found — login screen will ask to configure it"
 fi
 
-# Usuarios invitados: GUEST_USERS="correo:clave,correo2:clave2". Se inyecta en
-# base64 para no romper por caracteres especiales en las contraseñas.
-if [ -n "$GUEST_USERS" ]; then
-  echo "✅ Found GUEST_USERS, injecting (base64)..."
-  GUEST_USERS_B64=$(printf '%s' "$GUEST_USERS" | base64 | tr -d '\n')
-  for file in $JS_FILES; do
-    sed -i "s|__RUNTIME_GUEST_USERS_B64__|${GUEST_USERS_B64}|g" "$file"
-  done
-else
-  echo "ℹ️  No GUEST_USERS configured — guest login will be unavailable"
-fi
+# GUEST_USERS ya no se inyecta al navegador: lo valida el servidor (server/index.mjs).
 
-echo "🚀 Starting nginx..."
+echo "🚀 Starting server..."
 
-# Start nginx
-exec nginx -g 'daemon off;'
+# Servidor Node: SPA + API (/api) con Postgres
+exec node /app/server/index.mjs

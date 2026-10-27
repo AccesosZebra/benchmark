@@ -8,7 +8,7 @@ import LoadingScreen from './components/LoadingScreen';
 import PreAnalysisPanel from './components/PreAnalysisPanel';
 import HistoryPanel from './components/HistoryPanel';
 import { analyzeBenchmark, preAnalyze, addMoreCompetitors } from './services/researchService';
-import { saveBenchmark, updateBenchmark } from './services/storage';
+import { saveBenchmark, updateBenchmark, migrateLocalBenchmarks } from './services/storage';
 import { getSession } from './services/auth';
 import { reportGuestSpend, reportGuestAddonSpend } from './services/reporting';
 
@@ -37,6 +37,11 @@ const App: React.FC = () => {
   const [report, setReport] = useState<BenchmarkResult | null>(null);
   const [currentId, setCurrentId] = useState<string | null>(null);
   const [currentContext, setCurrentContext] = useState('');
+
+  // Sube una sola vez el historial que este navegador guardaba en localStorage.
+  useEffect(() => {
+    migrateLocalBenchmarks();
+  }, []);
 
   useEffect(() => {
     let interval: any;
@@ -89,17 +94,17 @@ const App: React.FC = () => {
       const ctx = buildContext();
       const result = await analyzeBenchmark(ctx, files, setLiveStatus);
       setReport(result);
+      setCurrentContext(ctx);
+      setStage('report');
       try {
-        const rec = saveBenchmark(ctx, result);
+        const rec = await saveBenchmark(ctx, result);
         setCurrentId(rec.id);
-        setCurrentContext(ctx);
         // Reporta el gasto al webhook solo si el usuario es invitado.
         const s = getSession();
         if (s?.provider === 'guest') reportGuestSpend(s, rec);
-      } catch {
-        /* almacenamiento/reporte no disponible */
+      } catch (err: any) {
+        setError(`El reporte se generó pero no se pudo guardar en el historial: ${err.message || 'error del servidor'}. Descárgalo para no perderlo.`);
       }
-      setStage('report');
     } catch (err: any) {
       setError(err.message || 'Error al investigar el mercado.');
       setStage(preAnalysis ? 'refine' : 'input');
@@ -130,7 +135,7 @@ const App: React.FC = () => {
     );
     setReport(updated);
     if (currentId) {
-      try { updateBenchmark(currentId, updated); } catch { /* noop */ }
+      try { await updateBenchmark(currentId, updated); } catch { /* el reporte sigue en pantalla */ }
     }
     const s = getSession();
     if (s?.provider === 'guest') {
@@ -173,6 +178,7 @@ const App: React.FC = () => {
         {stage === 'history' ? (
           <HistoryPanel
             onOpen={(rec) => {
+              setError(null);
               setReport(rec.result);
               setCurrentId(rec.id);
               setCurrentContext(rec.context || '');
@@ -181,7 +187,14 @@ const App: React.FC = () => {
             onClose={() => setStage(report ? 'report' : 'input')}
           />
         ) : stage === 'report' && report ? (
-          <BenchmarkReport report={report} onAddCompetitors={handleAddCompetitors} />
+          <div className="space-y-6">
+            {error && (
+              <div className="p-4 bg-surface-2 border border-line text-text rounded-card text-xs font-medium text-center font-mono">
+                {error}
+              </div>
+            )}
+            <BenchmarkReport report={report} onAddCompetitors={handleAddCompetitors} />
+          </div>
         ) : stage === 'loading' ? (
           <LoadingScreen status={liveStatus} fallback={LOADING_STEPS[loadingStep]} />
         ) : stage === 'refine' && preAnalysis ? (

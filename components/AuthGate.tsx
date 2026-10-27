@@ -41,9 +41,9 @@ const AuthGate: React.FC<{ children: React.ReactNode }> = ({ children }) => {
       }
       gid.initialize({
         client_id: clientId,
-        callback: (resp: any) => {
+        callback: async (resp: any) => {
           try {
-            const s = verifyCredential(resp.credential);
+            const s = await verifyCredential(resp.credential);
             saveSession(s);
             setError(null);
             setSession(s);
@@ -83,10 +83,10 @@ const AuthGate: React.FC<{ children: React.ReactNode }> = ({ children }) => {
     }
   };
 
-  const handleGuestSubmit = (e: React.FormEvent) => {
+  const handleGuestSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const s = verifyGuest(guestEmail, guestPassword);
+      const s = await verifyGuest(guestEmail, guestPassword);
       saveSession(s);
       setError(null);
       setSession(s);
@@ -217,7 +217,7 @@ const AuthGate: React.FC<{ children: React.ReactNode }> = ({ children }) => {
 
         <p className="mt-6 text-center text-[10px] text-muted font-normal leading-relaxed">
           Personal de Zebra: entra con Google. Clientes e invitados: usa el acceso con correo y contraseña.
-          Cada quien ve solo sus propios análisis.
+          Los invitados ven solo sus propios análisis.
         </p>
       </div>
     </div>
