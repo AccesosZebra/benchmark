@@ -7,7 +7,6 @@ export default defineConfig({
     // Reemplazo en build para no depender de `process` en el navegador.
     // Si no hay key en build, se deja un placeholder que el docker-entrypoint
     // sustituye en runtime con la variable de entorno del contenedor.
-    'process.env.ANTHROPIC_API_KEY': JSON.stringify(process.env.ANTHROPIC_API_KEY || '__RUNTIME_ANTHROPIC_API_KEY__'),
     'process.env.ANTHROPIC_MODEL': JSON.stringify(process.env.ANTHROPIC_MODEL || ''),
     // Client ID de Google (público). Placeholder sustituido en runtime por el entrypoint.
     'process.env.GOOGLE_CLIENT_ID': JSON.stringify(process.env.GOOGLE_CLIENT_ID || '__RUNTIME_GOOGLE_CLIENT_ID__'),

@@ -102,10 +102,25 @@ Variables de entorno requeridas:
 
 - `DATABASE_URL`: `postgres://usuario:clave@host:5432/base` (la tabla se crea sola al arrancar).
 - `SESSION_SECRET`: cadena aleatoria larga para firmar las sesiones.
+- `ENCRYPTION_KEY`: cadena aleatoria larga para cifrar las claves de Claude en la base (AES-256-GCM).
+  **No la cambies**: si se pierde, las claves guardadas dejan de poder leerse y hay que volver a cargarlas.
 - `GOOGLE_CLIENT_ID`: se valida también en el servidor (audiencia del ID token).
-- `GUEST_USERS`: `correo:clave,...` — ahora se valida solo en el servidor; ya no se envía al navegador.
 
 En el primer acceso, cada navegador sube automáticamente su historial previo de `localStorage`.
+
+## Claves de Claude e invitados (panel Admin)
+
+El navegador nunca recibe una clave de Claude: las llamadas pasan por `/api/anthropic`, que usa
+la clave asignada al invitado (si está activa) o la **predeterminada**. Cualquier usuario
+`@zebradigital.marketing` ve el botón **Admin** para:
+
+- Agregar claves (se verifican contra Anthropic y se guardan cifradas; solo se muestra `sk-ant-…a1b2`),
+  marcar la predeterminada, desactivarlas o borrarlas reasignando sus invitados a otra clave.
+- Crear invitados (contraseña con hash scrypt), asignarles o reasignarles clave, cambiar su
+  contraseña, desactivarlos (corta el acceso al instante) o eliminarlos.
+
+Importación única al arrancar con la base vacía: `GUEST_USERS` (`correo:clave,...`) → invitados, y
+`ANTHROPIC_API_KEY` → clave predeterminada. Después de eso, ambas variables pueden quitarse.
 
 Desarrollo local: `npm run server` (API en `:8080`, con `PORT=8080 DATABASE_URL=... SESSION_SECRET=...`)
 y `npm run dev` en paralelo (Vite hace proxy de `/api`).

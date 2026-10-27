@@ -188,22 +188,20 @@ input ──(Continuar)──▶ [preAnalyze] ──▶ refine ──(Lanzar)─
 
 ## 7. Configuración
 
-La app es cliente, así que la configuración llega por **variable de entorno** (inyectada en runtime)
-o por **`localStorage`**.
+La app se sirve desde un servidor Node (`server/index.mjs`) con Postgres. Las preferencias de
+investigación llegan por **variable de entorno** o **`localStorage`**:
 
 | Clave | Dónde | Defecto | Para qué |
 |---|---|---|---|
-| `ANTHROPIC_API_KEY` | env (runtime) o `localStorage` | — | Tu clave de Claude (obligatoria) |
 | `ANTHROPIC_MODEL` | env o `localStorage` | `claude-sonnet-5` | Modelo. `claude-opus-4-8` = máxima calidad, más caro |
 | `ANTHROPIC_MAX_COMPETITORS` | `localStorage` | `4` | Cuántos competidores investigar a fondo (2-8). Menos = más barato |
 
-### Inyección de la key en runtime
+### Claves de Claude
 
-Como es un estático, la env del contenedor no llega sola al navegador:
-
-1. En build, Vite deja el placeholder `__RUNTIME_ANTHROPIC_API_KEY__` en el bundle.
-2. Al arrancar, `docker-entrypoint.sh` lo reemplaza con `ANTHROPIC_API_KEY` del entorno.
-3. Si no hay env, la app cae limpiamente a `localStorage`.
+Las claves **no llegan al navegador**. El SDK apunta a `/api/anthropic` y el servidor reenvía la
+llamada a Anthropic con la clave que corresponde al usuario de la sesión (la asignada al invitado o
+la predeterminada). Las claves se administran desde el panel **Admin** y se guardan cifradas en
+Postgres. Detalle en [DEPLOYMENT.md](DEPLOYMENT.md).
 
 ---
 

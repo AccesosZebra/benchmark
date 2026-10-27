@@ -7,6 +7,7 @@ import ThemeToggle from './components/ThemeToggle';
 import LoadingScreen from './components/LoadingScreen';
 import PreAnalysisPanel from './components/PreAnalysisPanel';
 import HistoryPanel from './components/HistoryPanel';
+import AdminPanel from './components/AdminPanel';
 import { analyzeBenchmark, preAnalyze, addMoreCompetitors } from './services/researchService';
 import { saveBenchmark, updateBenchmark, migrateLocalBenchmarks } from './services/storage';
 import { getSession } from './services/auth';
@@ -22,7 +23,7 @@ const LOADING_STEPS = [
   "Finalizando el reporte de inteligencia...",
 ];
 
-type Stage = 'input' | 'refine' | 'loading' | 'report' | 'history';
+type Stage = 'input' | 'refine' | 'loading' | 'report' | 'history' | 'admin';
 
 const App: React.FC = () => {
   const [inputText, setInputText] = useState('');
@@ -158,6 +159,14 @@ const App: React.FC = () => {
           </button>
           <div className="flex items-center gap-2">
             <ThemeToggle />
+            {getSession()?.provider !== 'guest' && (
+              <button
+                onClick={() => setStage('admin')}
+                className="px-4 py-2 text-[10px] font-medium text-muted hover:text-text hover:bg-surface-2 rounded-btn transition-all border border-transparent uppercase tracking-widest font-mono"
+              >
+                Admin
+              </button>
+            )}
             <button
               onClick={() => setStage('history')}
               className="px-4 py-2 text-[10px] font-medium text-muted hover:text-text hover:bg-surface-2 rounded-btn transition-all border border-transparent uppercase tracking-widest font-mono"
@@ -175,7 +184,9 @@ const App: React.FC = () => {
       </header>
 
       <main className="max-w-6xl mx-auto px-4 mt-12">
-        {stage === 'history' ? (
+        {stage === 'admin' ? (
+          <AdminPanel onClose={() => setStage(report ? 'report' : 'input')} />
+        ) : stage === 'history' ? (
           <HistoryPanel
             onOpen={(rec) => {
               setError(null);

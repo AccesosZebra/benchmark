@@ -9,29 +9,23 @@ import {
   ProgressFn,
   PreAnalysis,
 } from "../types";
+import { getSession } from "./auth";
 
 // ---------------------------------------------------------------------------
 // Configuración
 // ---------------------------------------------------------------------------
 
-const getApiKey = (): string => {
-  // El build deja un placeholder que el docker-entrypoint sustituye en runtime.
-  // Si sigue sin sustituir (sin env), lo ignoramos y caemos a localStorage.
-  const fromEnv = process.env.ANTHROPIC_API_KEY;
-  const envKey = fromEnv && !fromEnv.includes("__RUNTIME") ? fromEnv : null;
-
-  const apiKey =
-    envKey ||
-    (typeof window !== "undefined" ? localStorage.getItem("ANTHROPIC_API_KEY") : null);
-
-  if (!apiKey) {
-    throw userError(
-      "API Key de Claude no configurada. " +
-        'Configura localStorage.setItem("ANTHROPIC_API_KEY", "tu_clave") ' +
-        "o define ANTHROPIC_API_KEY en el entorno. La obtienes en console.anthropic.com."
-    );
-  }
-  return apiKey;
+// El navegador no tiene ninguna clave de Claude: las llamadas pasan por el proxy
+// del servidor (/api/anthropic), que elige la clave asignada al usuario de la sesión.
+const makeClient = (): Anthropic => {
+  const token = getSession()?.token;
+  if (!token) throw userError("Tu sesión expiró. Vuelve a iniciar sesión.");
+  return new Anthropic({
+    apiKey: "proxy", // el servidor lo ignora y pone la clave real
+    baseURL: `${window.location.origin}/api/anthropic`,
+    defaultHeaders: { Authorization: `Bearer ${token}` },
+    dangerouslyAllowBrowser: true,
+  });
 };
 
 // Sonnet 5 = calidad casi-Opus a menos de la mitad del costo (por defecto, para
@@ -168,6 +162,9 @@ const extractJson = (raw: string): any => {
 const classifyError = (error: any): Error => {
   if (error?.userFacing) return error;
   console.error("Claude API Error:", error);
+
+  // Errores propios del proxy del servidor ({ error: "mensaje" }): ya vienen en lenguaje de usuario.
+  if (typeof error?.error?.error === "string") return userError(error.error.error);
 
   const status: number | undefined = error?.status ?? error?.statusCode;
   const raw: string = (error?.message || String(error ?? "")).toLowerCase();
@@ -413,7 +410,7 @@ const PREANALYSIS_SCHEMA = {
 export const preAnalyze = async (text: string, files: FileData[]): Promise<PreAnalysis> => {
   // Inicia la contabilidad de la corrida; el costo del pre-análisis cuenta.
   runUsage = zeroUsage();
-  const client = new Anthropic({ apiKey: getApiKey(), dangerouslyAllowBrowser: true });
+  const client = makeClient();
 
   const prompt = `Evalúa la CALIDAD del siguiente input para una investigación de benchmarking
 competitivo. Un buen input define con claridad: (1) el producto o servicio, (2) la zona o mercado
@@ -681,7 +678,7 @@ export const analyzeBenchmark = async (
   files: FileData[],
   onProgress?: ProgressFn
 ): Promise<BenchmarkResult> => {
-  const client = new Anthropic({ apiKey: getApiKey(), dangerouslyAllowBrowser: true });
+  const client = makeClient();
   const report = (msg: string) => onProgress?.(msg);
 
   // Fecha fijada al momento de lanzar la investigación (para prompts y sello).
@@ -815,7 +812,7 @@ export const addMoreCompetitors = async (
   onProgress?: ProgressFn
 ): Promise<{ report: BenchmarkResult; addedCost: ReturnType<typeof computeCost> }> => {
   runUsage = zeroUsage();
-  const client = new Anthropic({ apiKey: getApiKey(), dangerouslyAllowBrowser: true });
+  const client = makeClient();
   const emit = (m: string) => onProgress?.(m);
   setDateNote();
 
